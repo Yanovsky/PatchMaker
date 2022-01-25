@@ -1,0 +1,73 @@
+apply plugin: 'java'
+apply plugin: 'idea'
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+    maven {
+        url "https://dreamkas.jfrog.io/artifactory/start-utils-gradle-release-local"
+    }
+    mavenCentral()
+}
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+}
+
+dependencies {
+    compile(
+             fileTree(dir: 'libs', include: '**/*.jar'),
+            'ru.dreamkas.utils:versions-utils-java:+',
+            'org.apache.commons:commons-lang3:3.12.0',
+            //'org.apache.commons:commons-compress:1.21',
+            'commons-configuration:commons-configuration:1.10',
+            'commons-io:commons-io:2.11.0',
+            'com.jcraft:jsch:0.1.55',
+            'org.postgresql:postgresql:42.3.1',
+            'com.mashape.unirest:unirest-java:1.4.9',
+            'com.fasterxml.jackson.core:jackson-core:2.13.1',
+            'com.fasterxml.jackson.core:jackson-annotations:2.13.1',
+            'com.fasterxml.jackson.core:jackson-databind:2.13.1',
+            'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.13.1'
+    )
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+task copyToLibJars(type: Copy) {
+    into "$buildDir/libs/lib"
+    from configurations.runtime
+    dependsOn jar
+}
+
+task copyToLib(type: Copy) {
+    into "$buildDir/libs/lib"
+    from 'libs'
+    exclude '**/*.jar'
+    dependsOn copyToLibJars
+}
+
+task make {
+    dependsOn copyToLib
+}
+
+jar {
+    baseName = 'PatchMaker'
+    manifest {
+        attributes 'Main-Class': 'ru.dreamkas.patches.Main'
+    }
+    from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+//    from sourceSets.main.allSource
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
