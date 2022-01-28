@@ -21,8 +21,8 @@ dependencies {
     compile(
              fileTree(dir: 'libs', include: '**/*.jar'),
             'ru.dreamkas.utils:versions-utils-java:+',
+            'ch.qos.logback:logback-classic:1.2.10',
             'org.apache.commons:commons-lang3:3.12.0',
-            //'org.apache.commons:commons-compress:1.21',
             'commons-configuration:commons-configuration:1.10',
             'commons-io:commons-io:2.11.0',
             'com.jcraft:jsch:0.1.55',
@@ -60,7 +60,7 @@ task make {
 jar {
     baseName = 'PatchMaker'
     manifest {
-        attributes 'Main-Class': 'ru.dreamkas.patches.Main'
+        attributes 'Main-Class': 'ru.dreamkas.patches.PatchCreator'
     }
     from {
         configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }

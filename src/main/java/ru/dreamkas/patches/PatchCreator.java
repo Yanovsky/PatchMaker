@@ -1,64 +1,84 @@
 package ru.dreamkas.patches;
 
-import java.io.ByteArrayOutputStream;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Comparator;
 import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
+import java.util.stream.Collectors;
 
-import ru.dreamkas.patches.mapper.Mapper;
+import javax.swing.JOptionPane;
+
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import ru.dreamkas.patches.config.SafeConfiguration;
+import ru.dreamkas.semver.Version;
 
 public class PatchCreator {
+    private static final Logger log = LoggerFactory.getLogger(PatchCreator.class);
 
-    public static final String UPDATE_INFO_JSON = "update_info.json";
-
-    public static void create(Path patchFileFolder, List<PatchData> patches) throws Exception {
-        String from = patches.stream().min(Comparator.comparing(PatchData::getVersionFrom)).map(p -> p.getVersionFrom().toString()).orElse("");
-        String to = patches.stream().max(Comparator.comparing(PatchData::getVersionTo)).map(p -> p.getVersionTo().toString()).orElse("");
-        Path patchFile = patchFileFolder.resolve(String.format("start_%s_%s.update", from, to));
-        Files.deleteIfExists(patchFile);
-        Files.createFile(patchFile);
-        UpdateInfo updateInfo = new UpdateInfo();
-        System.out.printf("Create %s%n", patchFile.toAbsolutePath().normalize());
-        FileOutputStream fos = new FileOutputStream(patchFile.toFile());
-        ZipOutputStream zipOut = new ZipOutputStream(fos);
-        for (PatchData patch : patches) {
-            System.out.printf("Start processing %s%n", patch);
-            ZipEntry zipEntry = new ZipEntry(patch.getFileName());
-            zipOut.putNextEntry(zipEntry);
-            byte[] content = readContent(patch.getUrl());
-            zipOut.write(content, 0, content.length);
-
-            updateInfo.addPatch(patch);
-            System.out.printf("Processing complete%n");
+    public static void main(String[] args) throws Exception {
+        log.info("*********** Start PatchCreator ***********");
+        Spinner.show("Создание патча", "Подключение к базе данных");
+        Path propertiesFile = Paths.get(".", "application.properties");
+        if (Files.notExists(propertiesFile)) {
+            Spinner.hide();
+            JOptionPane.showMessageDialog(null, "Файл настроек application.properties не найден", "Ошибка", JOptionPane.ERROR_MESSAGE);
+            throw new Exception("Not found application.properties");
         }
-
-        System.out.printf("Start process %s%n", UPDATE_INFO_JSON);
-        ZipEntry zipEntry = new ZipEntry(UPDATE_INFO_JSON);
-        zipOut.putNextEntry(zipEntry);
-        byte[] content = Mapper.getInstance().createBytes(updateInfo);
-        zipOut.write(content, 0, content.length);
-        System.out.printf("Processing %s complete%n", UPDATE_INFO_JSON);
-
-        zipOut.close();
-        fos.close();
-        System.out.println("Complete");
-    }
-
-    private static byte[] readContent(URL url) throws Exception {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (InputStream is = url.openStream()) {
-            byte[] byteChunk = new byte[4096];
-            int n;
-            while ((n = is.read(byteChunk)) > 0) {
-                baos.write(byteChunk, 0, n);
-            }
+        SafeConfiguration config = SafeConfiguration.loadProperties(propertiesFile, false);
+        if (config == null) {
+            Spinner.hide();
+            JOptionPane.showMessageDialog(null, "Ошибка чтения файла настроек", "Ошибка", JOptionPane.ERROR_MESSAGE);
+            throw new Exception("Error while read application.properties");
         }
-        return baos.toByteArray();
+        Path sshKey = Paths.get(config.getString("sshKey", "C:/id_rsa.ppk"));
+        if (Files.notExists(sshKey)) {
+            Spinner.hide();
+            JOptionPane.showMessageDialog(null, "Файл ключа не найден", "Ошибка", JOptionPane.ERROR_MESSAGE);
+            throw new Exception("Not found " + sshKey.toAbsolutePath().normalize());
+        }
+        @NotNull Version beginVersion = Version.of(config.getString("beginVersion"));
+        @NotNull Version endVersion = Version.of(config.getString("endVersion"));
+        @NotNull String title = String.format("Создание патча с %s до %s", beginVersion, endVersion);
+        List<PatchData> patches;
+        try {
+            Spinner.show(title, "Подключение к базе данных");
+            Database database = new Database(sshKey, config.getString("sshUserName", ""), config.getString("dbUserName", "postgres"), config.getString("dbPassword"));
+            String productName = config.getString("product", "start_update");
+            patches = database.select(
+                "SELECT vf.comparable as from, vt.comparable as to, p.id, p.md5, p.size, p.url, p.info\n" +
+                    "FROM patches p\n" +
+                    "JOIN products pr ON (p.product_id = pr.id)\n" +
+                    "JOIN versions vf on (p.version_from_id = vf.id)\n" +
+                    "JOIN versions vt on (p.version_id = vt.id)\n" +
+                    "WHERE pr.name = '" + productName + "'"
+            );
+            database.disconnect();
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(null, title, e.getMessage(), JOptionPane.ERROR_MESSAGE);
+            throw e;
+        }
+        Spinner.show(title, "Вычисление подходящих патчей");
+        List<PatchData> applicablePatches = patches.stream()
+            .sorted(Comparator.comparing(PatchData::getVersionFrom))
+            .filter(p -> p.getVersionFrom().compareTo(beginVersion) >= 0 && p.getVersionTo().compareTo(endVersion) <= 0)
+            .collect(Collectors.toList());
+        if (applicablePatches.isEmpty()) {
+            Spinner.hide();
+            JOptionPane.showMessageDialog(null, "Список патчей пуст", "Ошибка", JOptionPane.ERROR_MESSAGE);
+            throw new Exception("Patches list is empty");
+        }
+        Path result;
+        try {
+            result = PatchProcessor.create(title, Paths.get(config.getString("outputFolder", Paths.get(".").toAbsolutePath().normalize().toString())), applicablePatches);
+            log.info("Patch {} complete\n\n", result);
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(null, title, e.getMessage(), JOptionPane.ERROR_MESSAGE);
+            throw e;
+        }
+        JOptionPane.showMessageDialog(null, String.format("Патч %s готов", result), "Информация", JOptionPane.INFORMATION_MESSAGE);
     }
 }
