@@ -5,10 +5,10 @@ sourceCompatibility = 1.8
 targetCompatibility = 1.8
 
 repositories {
+    mavenCentral()
     maven {
         url "https://dreamkas.jfrog.io/artifactory/start-utils-gradle-release-local"
     }
-    mavenCentral()
 }
 
 buildscript {

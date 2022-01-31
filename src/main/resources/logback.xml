@@ -22,7 +22,8 @@
         </triggeringPolicy>
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%d{dd.MM HH:mm:ss.SSS} %-5p [%c{1}.%M] %m%n</pattern>
+            <!--pattern>%d{dd.MM HH:mm:ss.SSS} %-5p [%c{1}.%M] %m%n</pattern-->
+            <pattern>%d{dd.MM HH:mm:ss.SSS} %-5p [%c] %m%n</pattern>
         </encoder>
     </appender>
 
